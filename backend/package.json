@@ -17,7 +17,8 @@
     "express": "^5.1.0",
     "mammoth": "^1.11.0",
     "multer": "^2.0.2",
-    "pdf-lib": "^1.17.1"
+    "pdf-lib": "^1.17.1",
+    "react-pdf": "^10.2.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"

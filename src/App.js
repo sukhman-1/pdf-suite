@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { 
   FileText, 
@@ -13,8 +13,19 @@ import {
   File,
   GripVertical,
   ArrowRight,
-  Download
+  Download,
+  Highlighter,
+  Edit3
 } from 'lucide-react';
+
+// --- PDF.js Worker Setup (for react-pdf) ---
+import { Document, Page } from 'react-pdf';
+import { pdfjs } from 'react-pdf';
+import 'react-pdf/dist/Page/AnnotationLayer.css';
+import 'react-pdf/dist/Page/TextLayer.css';
+
+// Simple reliable worker configuration
+pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js`;
 
 // --- Constants ---
 const APP_TITLE = "PDFSuite";
@@ -51,7 +62,7 @@ export default function App() {
         return <ToolSelection onSelectTool={setSelectedTool} />;
     }
   };
-
+  
   return (
     <div className="min-h-screen bg-gray-100 font-inter">
       {/* Header */}
@@ -99,7 +110,7 @@ export default function App() {
   );
 }
 
-// --- Tool Selection Component ---
+// ToolSelection and ToolCard components
 function ToolSelection({ onSelectTool }) {
   return (
     <div className="text-center">
@@ -120,7 +131,6 @@ function ToolSelection({ onSelectTool }) {
   );
 }
 
-// --- Tool Card Component ---
 function ToolCard({ tool, onClick }) {
   const Icon = tool.icon;
   return (
@@ -141,7 +151,7 @@ function ToolCard({ tool, onClick }) {
   );
 }
 
-// --- Generic File Upload Component ---
+// FileUploadZone, FileListItem, ProcessingOverlay components
 function FileUploadZone({ onDrop, accept, multiple = false, text = "Drag 'n' drop files here, or click to select" }) {
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -165,7 +175,6 @@ function FileUploadZone({ onDrop, accept, multiple = false, text = "Drag 'n' dro
   );
 }
 
-// --- File List Item ---
 function FileListItem({ file, onRemove }) {
   return (
     <li className="flex items-center justify-between bg-gray-50 p-3 rounded-md border border-gray-200">
@@ -183,7 +192,6 @@ function FileListItem({ file, onRemove }) {
   );
 }
 
-// --- Processing Overlay ---
 function ProcessingOverlay({ message }) {
   return (
     <div className="absolute inset-0 bg-white bg-opacity-80 flex flex-col items-center justify-center rounded-lg z-10">
@@ -193,7 +201,7 @@ function ProcessingOverlay({ message }) {
   );
 }
 
-// --- Download Helper Function ---
+// triggerDownload and DownloadResult components
 function triggerDownload(blob, filename) {
   const url = window.URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -205,7 +213,6 @@ function triggerDownload(blob, filename) {
   document.body.removeChild(a);
 }
 
-// --- Download Component ---
 function DownloadResult({ fileName, onReset, onDownload }) {
   return (
     <div className="text-center p-8 bg-green-50 rounded-lg border border-green-200">
@@ -234,7 +241,7 @@ function DownloadResult({ fileName, onReset, onDownload }) {
   );
 }
 
-// --- Tool: Merge PDF ---
+// MergeTool, SplitTool, ConvertTool, CompressTool, UnlockTool components
 function MergeTool() {
   const [files, setFiles] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -263,13 +270,16 @@ function MergeTool() {
         body: formData,
       });
       
-      if (!response.ok) throw new Error('Merge failed');
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || 'Merge failed');
+      }
       
       const blob = await response.blob();
       setDownloadBlob(blob);
     } catch (error) {
       console.error('Merge Error:', error);
-      setError('Failed to merge PDFs. Please make sure the backend server is running.');
+      setError(`Failed to merge: ${error.message}`);
     } finally {
       setIsProcessing(false);
     }
@@ -339,7 +349,6 @@ function MergeTool() {
   );
 }
 
-// --- Tool: Split PDF ---
 function SplitTool() {
   const [file, setFile] = useState(null);
   const [pageRange, setPageRange] = useState('');
@@ -371,13 +380,16 @@ function SplitTool() {
         body: formData 
       });
       
-      if (!response.ok) throw new Error('Split failed');
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || 'Split failed');
+      }
       
       const blob = await response.blob();
       setDownloadBlob(blob);
     } catch (error) {
       console.error('Split Error:', error);
-      setError('Failed to split PDF. Please check your page range and make sure the backend server is running.');
+      setError(`Failed to split PDF: ${error.message}`);
     } finally {
       setIsProcessing(false);
     }
@@ -447,7 +459,6 @@ function SplitTool() {
   );
 }
 
-// --- Tool: Convert Word to PDF ---
 function ConvertTool() {
   const [file, setFile] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -472,13 +483,16 @@ function ConvertTool() {
         body: formData 
       });
       
-      if (!response.ok) throw new Error('Conversion failed');
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || 'Conversion failed');
+      }
       
       const blob = await response.blob();
       setDownloadBlob(blob);
     } catch (error) {
       console.error('Convert Error:', error);
-      setError('Failed to convert file to PDF. Please make sure the backend server is running.');
+      setError(`Failed to convert: ${error.message}`);
     } finally {
       setIsProcessing(false);
     }
@@ -540,7 +554,6 @@ function ConvertTool() {
   );
 }
 
-// --- Tool: Compress PDF ---
 function CompressTool() {
   const [file, setFile] = useState(null);
   const [compressionLevel, setCompressionLevel] = useState('medium');
@@ -550,8 +563,8 @@ function CompressTool() {
   
   const levels = [
     { id: 'low', name: 'Low', description: 'Good quality, less compression.' },
-    { id: 'medium', name: 'Medium', description: 'Recommended balance.' },
-    { id: 'high', name: 'High', description: 'Smallest size, lower quality.' },
+    { id: 'medium', name: 'Medium', description: 'Balanced (Best for web).' },
+    { id: 'high', name: 'High', description: 'Smallest size (Screen only).' },
   ];
 
   const onDrop = useCallback((acceptedFiles) => {
@@ -573,13 +586,16 @@ function CompressTool() {
         body: formData 
       });
       
-      if (!response.ok) throw new Error('Compression failed');
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || 'Compression failed');
+      }
       
       const blob = await response.blob();
       setDownloadBlob(blob);
     } catch (error) {
       console.error('Compress Error:', error);
-      setError('Failed to compress PDF. Please make sure the backend server is running.');
+      setError(`Failed to compress: ${error.message}`);
     } finally {
       setIsProcessing(false);
     }
@@ -654,7 +670,6 @@ function CompressTool() {
   );
 }
 
-// --- Tool: Unlock PDF ---
 function UnlockTool() {
   const [file, setFile] = useState(null);
   const [password, setPassword] = useState('');
@@ -690,17 +705,16 @@ function UnlockTool() {
         throw new Error('Incorrect password');
       }
       
-      if (!response.ok) throw new Error('Unlock failed');
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.error || 'Unlock failed');
+      }
       
       const blob = await response.blob();
       setDownloadBlob(blob);
     } catch (error) {
       console.error('Unlock Error:', error);
-      if (error.message === 'Incorrect password') {
-        setError('Incorrect password. Please try again.');
-      } else {
-        setError('Failed to unlock PDF. Please make sure the backend server is running.');
-      }
+      setError(`Failed to unlock: ${error.message}`);
     } finally {
       setIsProcessing(false);
     }
@@ -769,33 +783,37 @@ function UnlockTool() {
   );
 }
 
-// --- Tool: Annotate PDF (Placeholder) ---
+// AnnotateTool component (simplified for now)
 function AnnotateTool() {
   const [file, setFile] = useState(null);
+  const [fileUrl, setFileUrl] = useState(null);
 
   const onDrop = useCallback((acceptedFiles) => {
-    setFile(acceptedFiles[0]);
+    const uploadedFile = acceptedFiles[0];
+    setFile(uploadedFile);
+    setFileUrl(URL.createObjectURL(uploadedFile));
   }, []);
 
   return (
-    <ToolWrapper title="Annotate PDF" description="Add notes, highlights, and drawings to your PDF. (Feature Mockup)">
-      {!file ? (
+    <ToolWrapper title="Annotate PDF" description="Add notes, highlights, and drawings to your PDF.">
+      {!fileUrl ? (
         <FileUploadZone onDrop={onDrop} accept={{ 'application/pdf': ['.pdf'] }} />
       ) : (
         <div className="bg-white p-8 rounded-lg shadow-lg">
-          <FileListItem file={file} onRemove={() => setFile(null)} />
+          <FileListItem file={file} onRemove={() => {
+            setFile(null);
+            setFileUrl(null);
+            URL.revokeObjectURL(fileUrl);
+          }} />
           <div className="mt-6 p-12 border-2 border-dashed border-gray-300 rounded-lg bg-gray-50 text-center">
             <Edit className="h-12 w-12 mx-auto text-gray-400" />
             <h3 className="mt-4 text-xl font-bold text-gray-800">PDF Annotator</h3>
             <p className="mt-2 text-gray-600">
-              In a full implementation, an interactive PDF editor would open here,
-              allowing you to add highlights, text, and drawings.
+              PDF loaded successfully. In a full implementation, an interactive PDF editor would open here.
             </p>
-            <button
-              className="mt-6 px-6 py-3 bg-red-600 text-white font-bold rounded-lg shadow-md hover:bg-red-700 transition-colors"
-            >
-              Open Annotator (Mock)
-            </button>
+            <p className="mt-2 text-sm text-gray-500">
+              File: {file.name}
+            </p>
           </div>
         </div>
       )}
@@ -803,15 +821,15 @@ function AnnotateTool() {
   );
 }
 
-// --- Tool Wrapper (for consistent layout) ---
+// Tool Wrapper component
 function ToolWrapper({ title, description, children }) {
   return (
-    <div className="max-w-3xl mx-auto">
+    <div className="max-w-4xl mx-auto">
       <div className="text-center mb-10">
         <h2 className="text-3xl font-extrabold text-gray-900">{title}</h2>
         <p className="mt-3 text-md text-gray-600">{description}</p>
       </div>
-      <div className="bg-white p-8 rounded-lg shadow-xl">
+      <div className="bg-white p-4 sm:p-8 rounded-lg shadow-xl">
         {children}
       </div>
     </div>
